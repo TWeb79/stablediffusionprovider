@@ -1,0 +1,26 @@
+# =============================================================================
+# Stable Diffusion API Service - Python Dependencies
+# Author: Inventions4All - github:TWeb79
+# =============================================================================
+
+# Core ML dependencies
+torch==2.2.0
+torchvision==0.17.0
+diffusers==0.27.0
+transformers==4.40.0
+accelerate==0.30.0
+safetensors==0.4.3
+
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.0
+pydantic==2.7.0
+pydantic-settings==2.2.1
+python-multipart==0.0.9
+
+# Configuration
+pyyaml==6.0.1
+python-dotenv==1.0.1
+
+# Image processing
+Pillow>=10.0.0

@@ -1,0 +1,29 @@
+# =============================================================================
+# Stable Diffusion API Service - Configuration
+# Author: Inventions4All - github:TWeb79
+# =============================================================================
+
+# API Server Configuration
+api:
+  host: "0.0.0.0"
+  port: 8141
+  workers: 1
+
+# Model Configuration
+model:
+  directory: "/models"
+  default_model: null
+  safety_checker: false
+
+# Device Configuration
+device:
+  device: "cuda"
+  attention_slicing: true
+  cpu_offload: false
+
+# Default Generation Parameters
+generation:
+  steps: 25
+  guidance: 7.5
+  width: 512
+  height: 512

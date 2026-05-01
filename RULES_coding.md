@@ -1,4 +1,4 @@
-# Coding Rules and Development Guidelines
+# Coding Rules and Development Guidelines v.2.1
 
 This document defines mandatory coding standards for all local projects. The goal is maintainability, scalability, readability, and production-grade structure even in experimental environments.
 
@@ -19,6 +19,7 @@ Write code as if another senior developer will maintain it tomorrow.
 Always create or update the implementationplan.md first before implementing.
 Always update documentation *.md as needed.
 Add the following author name = "Inventions4All - github:TWeb79"
+Add a .gitignore at the end and keep it updated
 
 ---
 
