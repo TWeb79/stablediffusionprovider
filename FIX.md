@@ -1,43 +1,66 @@
-Here's your copy-paste ready prompt:
+You are a senior Python & ML engineer responsible for making the Stable Diffusion provider production-ready on CPU in Docker and performant on Apple Silicon locally.
 
----
+## Primary Goal (Docker on ARM CPU)
 
-**Fix the following FastAPI/pydantic-settings application. The app crashes on startup in a restart loop.**
+Refactor the entire codebase so it runs on **CPU only** inside a Docker container based on **Debian 12 slim** targeting **ARM (Apple Silicon)**. CUDA is unavailable and must not be referenced.
 
-**Root cause:** `pydantic_settings.sources.SettingsError: error parsing value for field "device" from source "EnvSettingsSource"` — pydantic-settings tries to JSON-decode the `DEVICE=cuda` env var because `DeviceSettings` is a nested `BaseSettings` inside `Settings`, which triggers complex-type JSON parsing on a plain string value.
+### Mandatory Actions
+1. **Eliminate GPU logic**
+   - Remove `.cuda()`, `.to("cuda")`, CUDA environment variables, and any GPU health reporting.
+   - Delete `torch.cuda.*` conditionals; device detection must default to CPU.
 
-**File to fix: `src/core/config.py`**
+2. **CPU-focused device handling**
+   - Force `torch.device("cpu")` for inference.
+   - Explicitly load weights/tensors with `map_location="cpu"` where applicable.
 
-**Problems to fix:**
+3. **Data types & precision**
+   - Use `torch.float32` everywhere (diffusers, schedulers, manual tensors).
+   - Remove fp16/mixed-precision/autocast code paths.
 
-1. `DeviceSettings` has `env_prefix = ""` — this causes pydantic-settings to intercept `DEVICE` as a complex type and attempt `json.loads("cuda")`, which fails. Fix: Remove `DeviceSettings` as a `BaseSettings` subclass or use `model_config` with `env_nested_delimiter` correctly, OR read device/attention_slicing/cpu_offload as flat fields directly on the main `Settings` class and construct `DeviceSettings` manually.
+4. **Diffusers pipeline adjustments**
+   - Replace `pipe.to("cuda")` with `pipe.to("cpu")` (or keep on CPU by default).
+   - Enable CPU-friendly features: attention slicing, VAE slicing, sequential CPU offload.
 
-2. The same potential issue exists for `APISettings`, `ModelSettings`, `GenerationSettings` — all nested `BaseSettings` with prefix env vars being double-parsed.
+5. **CPU performance hygiene**
+   - Configure optimal threading via `torch.set_num_threads` and `torch.set_num_interop_threads` using detected cores or configuration values.
+   - Wrap inference in `torch.inference_mode()` (or `torch.no_grad()`).
+   - Ensure `pipeline.unet`, `vae`, etc., are set to `eval()`.
 
-3. Docker restart loop — caused solely by the startup crash above. Once config loads cleanly, the restart loop stops.
+6. **Environment alignment**
+   - Document and honor `OMP_NUM_THREADS` / `MKL_NUM_THREADS` env vars.
+   - Docker image must install official CPU wheels via `pip install torch torchvision` (no CUDA extras).
 
-**Fix strategy — replace nested `BaseSettings` with plain `BaseModel` for sub-configs, and read all env vars flat on the root `Settings` class:**
+7. **Documentation**
+   - Update README, API docs, ARCHITECTURE, implementation plan, and `.env.example` to describe CPU-only deployment, thread tuning, and removal of GPU requirements.
 
-```python
-# In Settings class, add flat env var fields:
-device_device: str = Field(default="cuda", alias="DEVICE")
-device_attention_slicing: bool = Field(default=True, alias="ATTENTION_SLICING")  
-device_cpu_offload: bool = Field(default=False, alias="CPU_OFFLOAD")
-api_host: str = Field(default="0.0.0.0", alias="API_HOST")
-api_port: int = Field(default=8141, alias="API_PORT")
-# etc.
-```
+## Secondary Goal (Local Apple Silicon Runner)
 
-Then construct `DeviceSettings`, `APISettings` etc. as plain `pydantic.BaseModel` (not `BaseSettings`) from those flat values inside `from_yaml()`, merging YAML + env vars manually.
+Provide one local execution path that can leverage Apple Metal (MPS) when running directly on macOS (not in Docker).
 
-**Also fix `DeviceSettings.validate_device` validator** — it must also accept `"auto"` since `docker-compose.yml` sets `DEVICE=${DEVICE:-cpu}` which could resolve to other values.
+### Deliverables for Local Mode
+1. **run_local.py script**
+   - Detect MPS via `torch.backends.mps.is_available()`.
+   - Prefer `device="mps"` when available; otherwise fall back to CPU.
+   - Expose simple CLI/entry point to start the FastAPI app with local settings (thread counts, model dir, etc.).
 
-**Requirements:**
-- Python 3.10
-- pydantic==2.5.3
-- pydantic-settings==2.1.0
-- All existing field names, types, and method signatures must remain unchanged
-- `get_settings()`, `reload_settings()`, `Settings.from_yaml()` signatures unchanged
-- YAML config `config/config.yml` must still load and be overridable by env vars
-- Docker compose env vars (`DEVICE`, `API_PORT`, `ATTENTION_SLICING`, `CPU_OFFLOAD`, `DEFAULT_STEPS`, `DEFAULT_GUIDANCE`, `DEFAULT_WIDTH`, `DEFAULT_HEIGHT`, `MODEL_DIR`, `DEFAULT_MODEL`, `SAFETY_CHECKER`, `HF_TOKEN`, `LOG_LEVEL`) must all work as plain string env vars without JSON parsing
-- All existing tests in `tests/test_config.py` must still pass
+2. **Configuration hooks**
+   - Allow overriding device to `mps` via env vars/CLI while keeping Docker default CPU.
+   - Document how to run: `python run_local.py --port 8141 --model-dir ./docker/dev/ai/external/_Models/Stable-diffusion`.
+
+3. **Performance considerations**
+   - When on MPS, keep float32 (no fp16) per Apple guidance unless project proves otherwise.
+   - Clearly separate Docker CPU instructions from local MPS instructions in docs.
+
+## Quality Gates
+
+- Architecture must remain modular; no business logic inside routes.
+- Tests must be updated to reflect CPU defaults and new device reporting (CPU/MPS only).
+- Author attribution stays "Inventions4All - github:TWeb79" in any touched files.
+- No references to CUDA, ROCm, or discrete GPUs anywhere in the final diff.
+
+## Reporting
+
+When the work is complete, include:
+1. Summary of code changes tied to CPU enforcement and local runner implementation.
+2. Performance-related justifications (thread counts, inference_mode, slicing, etc.).
+3. Instructions for running Docker CPU mode and local MPS mode.

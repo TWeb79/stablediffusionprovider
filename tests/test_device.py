@@ -19,76 +19,74 @@ from src.core.device import (
 class TestDetectDevice:
     """Tests for device detection."""
     
-    @patch("torch.cuda.is_available")
-    def test_detect_cuda_available(self, mock_cuda_available):
-        """Test detection when CUDA is available."""
-        mock_cuda_available.return_value = True
+    @patch("torch.backends.mps.is_available")
+    def test_detect_auto_prefers_mps(self, mock_mps):
+        """Auto detection should prefer MPS when available."""
+        mock_mps.return_value = True
         
         device = detect_device()
-        assert device == "cuda"
+        assert device == "mps"
     
-    @patch("torch.cuda.is_available")
-    def test_detect_cuda_not_available(self, mock_cuda_available):
-        """Test detection when CUDA is not available."""
-        mock_cuda_available.return_value = False
+    @patch("torch.backends.mps.is_available")
+    def test_detect_auto_falls_back_to_cpu(self, mock_mps):
+        """Auto detection should fall back to CPU when MPS unavailable."""
+        mock_mps.return_value = False
         
         device = detect_device()
         assert device == "cpu"
     
-    @patch("torch.cuda.is_available")
-    def test_prefer_cuda(self, mock_cuda_available):
-        """Test explicit CUDA preference."""
-        mock_cuda_available.return_value = True
+    @patch("torch.backends.mps.is_available")
+    def test_prefer_mps(self, mock_mps):
+        """Explicit MPS preference uses MPS when available."""
+        mock_mps.return_value = True
         
-        device = detect_device("cuda")
-        assert device == "cuda"
+        device = detect_device("mps")
+        assert device == "mps"
     
-    @patch("torch.cuda.is_available")
-    def test_prefer_cpu(self, mock_cuda_available):
-        """Test explicit CPU preference."""
-        mock_cuda_available.return_value = True
+    @patch("torch.backends.mps.is_available")
+    def test_mps_requested_but_unavailable(self, mock_mps):
+        """MPS request falls back to CPU when unavailable."""
+        mock_mps.return_value = False
         
-        device = detect_device("cpu")
-        assert device == "cpu"
-    
-    @patch("torch.cuda.is_available")
-    def test_cuda_requested_but_unavailable(self, mock_cuda_available):
-        """Test CUDA requested but not available falls back to CPU."""
-        mock_cuda_available.return_value = False
-        
-        device = detect_device("cuda")
+        device = detect_device("mps")
         assert device == "cpu"
 
 
 class TestGetDeviceInfo:
     """Tests for getting device information."""
     
-    @patch("torch.cuda.is_available")
-    @patch("torch.cuda.get_device_name")
-    @patch("torch.cuda.get_device_properties")
-    def test_cuda_device_info(self, mock_props, mock_name, mock_cuda_available):
-        """Test getting CUDA device info."""
-        mock_cuda_available.return_value = True
-        mock_name.return_value = "NVIDIA RTX 3090"
-        mock_props.return_value = MagicMock(total_memory=24 * 1024**3)
+    @patch("torch.backends.mps.is_available")
+    @patch("torch.get_num_interop_threads")
+    @patch("torch.get_num_threads")
+    def test_mps_device_info(self, mock_threads, mock_interop, mock_mps):
+        """Test getting MPS device info."""
+        mock_mps.return_value = True
+        mock_threads.return_value = 8
+        mock_interop.return_value = 4
         
-        info = get_device_info("cuda")
+        info = get_device_info("mps")
         
-        assert info.name == "NVIDIA RTX 3090"
-        assert info.type == "cuda"
-        assert info.cuda_available is True
-        assert info.cuda_device_count == 1
+        assert info.name == "Apple Metal (MPS)"
+        assert info.type == "mps"
+        assert info.mps_available is True
+        assert info.num_threads == 8
+        assert info.interop_threads == 4
     
-    @patch("torch.cuda.is_available")
-    def test_cpu_device_info(self, mock_cuda_available):
+    @patch("torch.backends.mps.is_available")
+    @patch("torch.get_num_interop_threads")
+    @patch("torch.get_num_threads")
+    def test_cpu_device_info(self, mock_threads, mock_interop, mock_mps):
         """Test getting CPU device info."""
-        mock_cuda_available.return_value = False
+        mock_mps.return_value = False
+        mock_threads.return_value = 16
+        mock_interop.return_value = 8
         
         info = get_device_info("cpu")
         
         assert info.name == "CPU"
         assert info.type == "cpu"
-        assert info.cuda_available is False
+        assert info.mps_available is False
+        assert info.num_threads == 16
 
 
 class TestGetMemoryRequirements:
@@ -127,16 +125,6 @@ class TestGetMemoryRequirements:
 class TestOptimizeForDevice:
     """Tests for device optimization settings."""
     
-    def test_cuda_optimizations(self):
-        """Test optimization settings for CUDA."""
-        settings = optimize_for_device("cuda", attention_slicing=True, cpu_offload=True)
-        
-        assert settings["device"] == "cuda"
-        assert settings["attention_slicing"] is True
-        assert settings["cpu_offload"] is True
-        assert settings["enable_vae_slicing"] is True
-        assert settings["enable_sequential_cpu_offload"] is True
-    
     def test_cpu_optimizations(self):
         """Test optimization settings for CPU."""
         settings = optimize_for_device("cpu", attention_slicing=True, cpu_offload=True)
@@ -144,5 +132,14 @@ class TestOptimizeForDevice:
         assert settings["device"] == "cpu"
         # CPU always uses attention slicing
         assert settings["attention_slicing"] is True
-        # CPU offload doesn't apply to CPU device
+        assert settings["cpu_offload"] is True
+        assert settings["enable_vae_slicing"] is True
+        assert settings["enable_sequential_cpu_offload"] is True
+    
+    def test_mps_optimizations(self):
+        """Test optimization settings for MPS."""
+        settings = optimize_for_device("mps", attention_slicing=False, cpu_offload=False)
+        
+        assert settings["device"] == "mps"
+        assert settings["attention_slicing"] is False
         assert settings["cpu_offload"] is False

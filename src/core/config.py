@@ -1,8 +1,9 @@
 """
-Configuration management for Stable Diffusion API Service.
+Configuration management for the Stable Diffusion API Service.
 
-Loads configuration from environment variables and config.yml file.
-Provides type-safe settings with validation and sensible defaults.
+Loads configuration from environment variables and config.yml file, enforcing the
+project-wide requirement that Docker deployments run on CPU while local runs may
+optionally leverage Apple Metal (MPS).
 
 Author: Inventions4All - github:TWeb79
 """
@@ -34,17 +35,21 @@ class ModelSettings(BaseModel):
 class DeviceSettings(BaseModel):
     """Device configuration settings."""
     
-    device: str = Field(default="cuda", description="Compute device (cuda/cpu/mps/auto)")
+    device: str = Field(default="cpu", description="Compute device (cpu/mps/auto)")
     attention_slicing: bool = Field(default=True, description="Enable attention slicing")
-    cpu_offload: bool = Field(default=False, description="Enable CPU offload")
+    cpu_offload: bool = Field(default=True, description="Enable sequential CPU offload")
+    num_threads: Optional[int] = Field(default=None, description="torch.set_num_threads value")
+    interop_threads: Optional[int] = Field(default=None, description="torch.set_num_interop_threads value")
+    omp_num_threads: Optional[int] = Field(default=None, description="OMP_NUM_THREADS export")
+    mkl_num_threads: Optional[int] = Field(default=None, description="MKL_NUM_THREADS export")
     
     @field_validator("device")
     @classmethod
-    def validate_device(cls, v: str) -> str:
-        """Validate device is either cuda, cpu, mps, or auto."""
-        if v not in ("cuda", "cpu", "mps", "auto"):
-            raise ValueError("Device must be 'cuda', 'cpu', 'mps', or 'auto'")
-        return v
+    def validate_device(cls, value: str) -> str:
+        """Validate device is either cpu, mps, or auto."""
+        if value not in ("cpu", "mps", "auto"):
+            raise ValueError("Device must be 'cpu', 'mps', or 'auto'")
+        return value
 
 
 class GenerationSettings(BaseModel):
@@ -83,9 +88,13 @@ class Settings(BaseModel):
     model_safety_checker: bool = Field(default=False, alias="SAFETY_CHECKER")
     
     # Flat env var fields for device settings
-    device_device: str = Field(default="cuda", alias="DEVICE")
+    device_device: str = Field(default="cpu", alias="DEVICE")
     device_attention_slicing: bool = Field(default=True, alias="ATTENTION_SLICING")
-    device_cpu_offload: bool = Field(default=False, alias="CPU_OFFLOAD")
+    device_cpu_offload: bool = Field(default=True, alias="CPU_OFFLOAD")
+    device_num_threads: Optional[int] = Field(default=None, alias="TORCH_NUM_THREADS")
+    device_interop_threads: Optional[int] = Field(default=None, alias="TORCH_INTEROP_THREADS")
+    device_omp_threads: Optional[int] = Field(default=None, alias="OMP_NUM_THREADS")
+    device_mkl_threads: Optional[int] = Field(default=None, alias="MKL_NUM_THREADS")
     
     # Flat env var fields for generation settings
     generation_steps: int = Field(default=25, alias="DEFAULT_STEPS")
@@ -144,9 +153,13 @@ class Settings(BaseModel):
         kwargs["model_safety_checker"] = os.environ.get("SAFETY_CHECKER", "").lower() in ("true", "1", "yes") if "SAFETY_CHECKER" in os.environ else model_config.get("safety_checker", False)
         
         # Device settings
-        kwargs["device_device"] = os.environ.get("DEVICE", device_config.get("device", "cuda")) or "cuda"
+        kwargs["device_device"] = os.environ.get("DEVICE", device_config.get("device", "cpu")) or "cpu"
         kwargs["device_attention_slicing"] = os.environ.get("ATTENTION_SLICING", "").lower() in ("true", "1", "yes") if "ATTENTION_SLICING" in os.environ else device_config.get("attention_slicing", True)
-        kwargs["device_cpu_offload"] = os.environ.get("CPU_OFFLOAD", "").lower() in ("true", "1", "yes") if "CPU_OFFLOAD" in os.environ else device_config.get("cpu_offload", False)
+        kwargs["device_cpu_offload"] = os.environ.get("CPU_OFFLOAD", "").lower() in ("true", "1", "yes") if "CPU_OFFLOAD" in os.environ else device_config.get("cpu_offload", True)
+        kwargs["device_num_threads"] = int(os.environ.get("TORCH_NUM_THREADS", str(device_config.get("num_threads", 0))) or 0) or None
+        kwargs["device_interop_threads"] = int(os.environ.get("TORCH_INTEROP_THREADS", str(device_config.get("interop_threads", 0))) or 0) or None
+        kwargs["device_omp_threads"] = int(os.environ.get("OMP_NUM_THREADS", str(device_config.get("omp_num_threads", 0))) or 0) or None
+        kwargs["device_mkl_threads"] = int(os.environ.get("MKL_NUM_THREADS", str(device_config.get("mkl_num_threads", 0))) or 0) or None
         
         # Generation settings
         kwargs["generation_steps"] = int(os.environ.get("DEFAULT_STEPS", str(generation_config.get("steps", 25))) or 25)
@@ -187,6 +200,10 @@ class Settings(BaseModel):
             device=self.device_device,
             attention_slicing=self.device_attention_slicing,
             cpu_offload=self.device_cpu_offload,
+            num_threads=self.device_num_threads,
+            interop_threads=self.device_interop_threads,
+            omp_num_threads=self.device_omp_threads,
+            mkl_num_threads=self.device_mkl_threads,
         )
     
     @property

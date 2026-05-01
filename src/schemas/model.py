@@ -38,16 +38,6 @@ class ModelLoadRequest(BaseModel):
     )
 
 
-class LoadModelRequest(BaseModel):
-    """Request to load a model by full file path."""
-    
-    model_path: str = Field(
-        ...,
-        min_length=1,
-        description="Full path to the model file (e.g., /models/model.safetensors)",
-    )
-
-
 class ModelLoadResponse(BaseModel):
     """Response after loading a model."""
     

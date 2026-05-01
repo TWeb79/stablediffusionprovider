@@ -45,10 +45,11 @@ class TestHealthEndpoint:
             current_model="test_model.safetensors"
         )
         mock_device_info.return_value = MagicMock(
-            name="NVIDIA RTX 3090",
-            type="cuda",
-            cuda_available=True,
-            cuda_device_count=1,
+            name="CPU",
+            type="cpu",
+            mps_available=False,
+            num_threads=8,
+            interop_threads=4,
         )
         
         response = client.get("/health")
@@ -58,9 +59,10 @@ class TestHealthEndpoint:
         assert data["status"] == "healthy"
         assert "timestamp" in data
         assert data["loaded_model"] == "test_model.safetensors"
-        assert data["device"] == "NVIDIA RTX 3090"
-        assert data["device_type"] == "cuda"
-        assert data["cuda_available"] is True
+        assert data["device"] == "CPU"
+        assert data["device_type"] == "cpu"
+        assert data["mps_available"] is False
+        assert data["torch_num_threads"] == 8
 
 
 class TestModelsEndpoint:
@@ -103,7 +105,7 @@ class TestModelsEndpoint:
         mock_pipeline.return_value = MagicMock(
             load_model=MagicMock(),
             current_model="test_model.safetensors",
-            device="cuda",
+            device="cpu",
             attention_slicing=True,
             cpu_offload=False,
         )
@@ -114,7 +116,7 @@ class TestModelsEndpoint:
         data = response.json()
         assert data["success"] is True
         assert data["model"] == "test_model.safetensors"
-        assert data["device"] == "cuda"
+        assert data["device"] == "cpu"
     
     @patch("src.api.routes.models.get_pipeline_manager")
     def test_load_model_not_found(self, mock_pipeline, client):

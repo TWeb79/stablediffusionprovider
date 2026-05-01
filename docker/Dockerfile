@@ -1,34 +1,59 @@
 # =============================================================================
-# Stable Diffusion API Service - Dockerfile (CUDA-enabled)
+# Stable Diffusion API Service - Dockerfile (CPU-only, ARM compatible)
+# Base: debian:12-slim (as per RULES_coding.md)
 # Author: Inventions4All - github:TWeb79
 # =============================================================================
 
-# Use PyTorch official image with CUDA 11.8 and cuDNN 8 runtime
-FROM pytorch/pytorch:2.2.2-cuda11.8-cudnn8-runtime
+FROM debian:12-slim
 
-# Set environment variables
+# -----------------------------------------------------------------------------
+# Environment
+# -----------------------------------------------------------------------------
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-# Install system dependencies for image processing
+# -----------------------------------------------------------------------------
+# System dependencies
+# -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    curl \
     libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
     libxrender1 \
     libgomp1 \
-    curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install additional Python dependencies
-# Note: torch and torchvision are already included in base image
-RUN pip install --no-cache-dir \
+# -----------------------------------------------------------------------------
+# Python setup (venv instead of --break-system-packages)
+# -----------------------------------------------------------------------------
+RUN python3.11 -m venv /opt/venv
+
+# Upgrade pip
+RUN pip install --upgrade pip
+
+# -----------------------------------------------------------------------------
+# Install PyTorch (CPU, ARM-compatible)
+# -----------------------------------------------------------------------------
+RUN pip install \
+    torch==2.2.2 \
+    torchvision==0.17.2
+
+# -----------------------------------------------------------------------------
+# Install application dependencies
+# -----------------------------------------------------------------------------
+RUN pip install \
     diffusers==0.25.0 \
     transformers==4.36.0 \
     accelerate==0.25.0 \
@@ -43,30 +68,43 @@ RUN pip install --no-cache-dir \
     python-dotenv==1.0.0 \
     Pillow>=10.0.0
 
-# Create non-root user for security
+# -----------------------------------------------------------------------------
+# Security: non-root user
+# -----------------------------------------------------------------------------
 RUN groupadd -r sdprovider && useradd -r -g sdprovider sdprovider
 
-# Create model directory
-RUN mkdir -p /models && chown -R sdprovider:sdprovider /models
+# -----------------------------------------------------------------------------
+# Directories
+# -----------------------------------------------------------------------------
+RUN mkdir -p /models /tmp/hf_cache && \
+    chown -R sdprovider:sdprovider /models /tmp/hf_cache
 
-# Copy application code
+# -----------------------------------------------------------------------------
+# Copy application
+# -----------------------------------------------------------------------------
 COPY --chown=sdprovider:sdprovider src/ ./src/
 COPY --chown=sdprovider:sdprovider config/ ./config/
 COPY --chown=sdprovider:sdprovider requirements.txt ./
 
-# Switch to non-root user
+# -----------------------------------------------------------------------------
+# Switch user
+# -----------------------------------------------------------------------------
 USER sdprovider
 
-# Set cache directory for HuggingFace
+# -----------------------------------------------------------------------------
+# HuggingFace cache
+# -----------------------------------------------------------------------------
 ENV HF_HOME=/tmp/hf_cache
-RUN mkdir -p /tmp/hf_cache && chmod 777 /tmp/hf_cache
 
-# Expose API port (8141 for project 41)
+# -----------------------------------------------------------------------------
+# API
+# -----------------------------------------------------------------------------
 EXPOSE 8141
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 CMD \
     curl -f http://localhost:8141/health || exit 1
 
-# Run the application
+# -----------------------------------------------------------------------------
+# Start
+# -----------------------------------------------------------------------------
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8141"]

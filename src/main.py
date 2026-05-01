@@ -14,8 +14,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import generate, health, load, models
-from .core.config import get_settings
+from src.api.routes import generate, health, load, models
+from src.core.config import get_settings
 
 # Configure logging
 logging.basicConfig(

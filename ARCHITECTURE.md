@@ -30,6 +30,28 @@ The SDProvider is a Docker-based REST API service for Stable Diffusion image gen
 
 ---
 
+## Deployment Modes
+
+### Docker (CPU Only)
+
+The primary deployment mode runs in Docker containers based on **Debian 12 slim** with **CPU-only** inference. This is optimized for Apple Silicon hosts running Docker Desktop.
+
+- No GPU/CUDA dependencies
+- ARM64 compatible
+- Sequential CPU offload enabled by default
+- Threading optimized for multi-core CPUs
+
+### Local (MPS/CPU)
+
+For development and local testing on macOS, `run_local.py` provides an entry point that:
+
+- Auto-detects Apple Metal (MPS) availability
+- Falls back to CPU when MPS is unavailable
+- Configures optimal threading automatically
+- Supports CLI overrides for device and threading
+
+---
+
 ## Module Responsibilities
 
 ### `src/main.py`
@@ -37,6 +59,12 @@ The SDProvider is a Docker-based REST API service for Stable Diffusion image gen
 - Lifespan management (startup/shutdown)
 - Router registration
 - CORS middleware configuration
+
+### `run_local.py`
+- Local development entry point
+- MPS/CPU auto-detection
+- CLI argument parsing
+- Threading configuration
 
 ### `src/core/`
 Core business logic layer - no API dependencies.
@@ -48,14 +76,15 @@ Core business logic layer - no API dependencies.
 - Singleton pattern for global settings access
 
 #### `device.py`
-- CUDA/CPU device detection
+- CPU/MPS device detection
 - Memory requirement estimation
 - Device optimization settings
+- Threading configuration
 
 #### `pipeline.py`
 - Stable Diffusion pipeline lifecycle management
 - Model loading from .safetensors and .ckpt files
-- Memory optimization (attention slicing, CPU offload)
+- Memory optimization (attention slicing, VAE slicing, CPU offload)
 - Image generation with DPM++ scheduler
 
 ### `src/api/`
@@ -65,6 +94,7 @@ API layer - depends on core layer.
 - `health.py` - Service health check endpoint
 - `models.py` - Model discovery and loading endpoints
 - `generate.py` - Image generation endpoint
+- `load.py` - Model loading from path endpoint
 
 #### `dependencies.py`
 - Shared FastAPI dependencies
@@ -76,6 +106,7 @@ Pydantic models for request/response validation.
 - `health.py` - Health check response schema
 - `model.py` - Model info and list schemas
 - `generate.py` - Generation request/response schemas
+- `load.py` - Load model request schema
 
 ---
 
@@ -131,12 +162,12 @@ Pydantic models for request/response validation.
 
 | Dependency | Purpose | Version |
 |------------|---------|---------|
-| torch | PyTorch ML framework | 2.2.0 |
-| diffusers | Stable Diffusion pipelines | 0.27.0 |
-| transformers | Model utilities | 4.40.0 |
-| fastapi | Web framework | 0.111.0 |
-| uvicorn | ASGI server | 0.30.0 |
-| pydantic | Data validation | 2.7.0 |
+| torch | PyTorch ML framework (CPU/MPS) | 2.2.2 |
+| diffusers | Stable Diffusion pipelines | 0.25.0 |
+| transformers | Model utilities | 4.36.0 |
+| fastapi | Web framework | 0.109.0 |
+| uvicorn | ASGI server | 0.27.0 |
+| pydantic | Data validation | 2.5.3 |
 
 ---
 
@@ -175,15 +206,28 @@ Configuration values are loaded in this priority order (highest to lowest):
 
 ## Memory Optimization Strategy
 
-The service uses multiple strategies to reduce VRAM usage:
+The service uses multiple strategies to reduce memory usage:
 
 1. **Attention Slicing**: Splits attention computation into smaller parts
 2. **VAE Slicing**: Processes VAE in slices for large images
-3. **Sequential CPU Offload**: Moves model components to CPU when not in use
+3. **Sequential CPU Offload**: Moves model components to CPU when not in use (CPU mode only)
 
 These can be configured via environment variables:
 - `ATTENTION_SLICING=true` (default)
-- `CPU_OFFLOAD=false` (default)
+- `CPU_OFFLOAD=true` (default for CPU)
+
+---
+
+## Threading Configuration
+
+For optimal CPU performance:
+
+| Variable | Description | Auto-Detection |
+|----------|-------------|----------------|
+| `TORCH_NUM_THREADS` | PyTorch thread count | 50% of CPU cores |
+| `TORCH_INTEROP_THREADS` | Inter-op parallelism | 25% of CPU cores |
+| `OMP_NUM_THREADS` | OpenMP thread count | Matches TORCH_NUM_THREADS |
+| `MKL_NUM_THREADS` | Intel MKL thread count | Matches TORCH_NUM_THREADS |
 
 ---
 

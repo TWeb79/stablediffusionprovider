@@ -1,6 +1,6 @@
 # Stable Diffusion API Provider
 
-A Docker-based REST API service for Stable Diffusion image generation with GPU acceleration support.
+A Docker-based REST API service for Stable Diffusion image generation optimized for **CPU-only** execution in Debian 12 slim containers on Apple Silicon hosts. A dedicated `run_local.py` entry point enables Apple Metal (MPS) acceleration when running directly on macOS.
 
 **Author:** Inventions4All - github:TWeb79
 
@@ -10,10 +10,10 @@ A Docker-based REST API service for Stable Diffusion image generation with GPU a
 
 This service provides a FastAPI-based REST API for generating images using Stable Diffusion models. It supports:
 
-- GPU acceleration (NVIDIA CUDA) with automatic CPU fallback
+- CPU-only inference in Docker (Debian 12 slim, ARM64)
+- Apple Metal (MPS) acceleration via `run_local.py` when running directly on macOS
 - Model loading from a central folder (no copying required)
-- Memory optimization (attention slicing, CPU offload)
-- REST API for image generation
+- Memory optimization (attention slicing, VAE slicing, CPU offload)
 - Auto-generated API documentation
 
 ---
@@ -30,9 +30,9 @@ This service provides a FastAPI-based REST API for generating images using Stabl
 
 ### Prerequisites
 
-- Docker with NVIDIA GPU support (for GPU acceleration)
+- Docker Desktop on macOS (Apple Silicon)
 - Stable Diffusion model files (.safetensors or .ckpt)
-- Model directory mounted at `./dev/ai/external/_Models/Stable-diffusion`
+- Model directory mounted at `./docker/dev/ai/external/_Models/Stable-diffusion`
 
 ### Running with Docker Compose
 
@@ -53,13 +53,11 @@ docker-compose -f docker/docker-compose.yml down
 # Install dependencies
 pip install -r requirements.txt
 
-# Set environment variables
-export MODEL_DIR=./models
-export DEVICE=cuda  # or cpu
-export API_PORT=8141
-
-# Run the service
+# Run with CPU (default)
 python -m src.main
+
+# Run with Apple Metal (MPS) using helper
+python run_local.py --model-dir ./docker/dev/ai/external/_Models/Stable-diffusion --port 8141
 ```
 
 ---
@@ -78,12 +76,13 @@ Returns service health status and system information.
 ```json
 {
   "status": "healthy",
-  "timestamp": "2024-01-01T00:00:00Z",
+  "timestamp": "2026-05-01T00:00:00Z",
   "loaded_model": "model.safetensors",
-  "device": "NVIDIA RTX 3090",
-  "device_type": "cuda",
-  "cuda_available": true,
-  "cuda_device_count": 1
+  "device": "CPU",
+  "device_type": "cpu",
+  "mps_available": false,
+  "torch_num_threads": 8,
+  "torch_interop_threads": 4
 }
 ```
 
@@ -163,7 +162,11 @@ curl -o output.png "http://localhost:8141/generate?prompt=a%20cat&negative_promp
 | `API_PORT` | 8141 | API server port |
 | `MODEL_DIR` | /models | Path to model files |
 | `DEFAULT_MODEL` | auto | Default model to load |
-| `DEVICE` | cuda | Compute device (cuda/cpu) |
+| `DEVICE` | cpu | Compute device (cpu/mps/auto). `auto` prefers MPS when available locally. |
+| `TORCH_NUM_THREADS` | (unset) | Optional override for `torch.set_num_threads` |
+| `TORCH_INTEROP_THREADS` | (unset) | Optional override for `torch.set_num_interop_threads` |
+| `OMP_NUM_THREADS` | (unset) | Optional CPU threading hint |
+| `MKL_NUM_THREADS` | (unset) | Optional MKL threading hint |
 | `DEFAULT_STEPS` | 25 | Default inference steps |
 | `DEFAULT_GUIDANCE` | 7.5 | Default guidance scale |
 | `DEFAULT_WIDTH` | 512 | Default image width |
@@ -171,13 +174,11 @@ curl -o output.png "http://localhost:8141/generate?prompt=a%20cat&negative_promp
 | `HF_TOKEN` | - | HuggingFace token (optional) |
 | `LOG_LEVEL` | INFO | Logging level |
 
-### GPU Memory Requirements
+### CPU Performance Tips
 
-| Resolution | Recommended VRAM |
-|------------|-----------------|
-| 512x512 | 6-8 GB |
-| 768x768 | 8-10 GB |
-| 1024x1024 | 12+ GB |
+- Keep image sizes at 512x512 or 640x640 for fastest CPU inference
+- Set `TORCH_NUM_THREADS` to the number of physical cores (e.g., 8 on M2 Pro)
+- Enable sequential CPU offload for lower memory usage (default in Docker)
 
 ---
 
@@ -204,22 +205,21 @@ Place model files in the mounted model directory. The service will automatically
 
 ## Troubleshooting
 
-### CUDA Out of Memory
+### Slow Generation on CPU
 
-If you encounter OOM errors:
-
-1. Enable attention slicing: `ATTENTION_SLICING=true`
-2. Enable CPU offload: `CPU_OFFLOAD=true`
-3. Reduce image resolution
-4. Reduce batch size
+1. Reduce `steps` (e.g., 20)
+2. Lower resolution to 448x448 or 512x512
+3. Increase `TORCH_NUM_THREADS`/`OMP_NUM_THREADS`
+4. Batch size must remain 1 for CPU workloads
 
 ### Model Not Found
 
 Ensure your model directory is correctly mounted and contains `.safetensors` or `.ckpt` files.
 
-### Slow Generation on CPU
+### Apple Metal (MPS) Issues
 
-CPU generation is significantly slower than GPU. For best performance, use a GPU with at least 6GB VRAM.
+- Ensure you run `python run_local.py` outside Docker
+- Requires PyTorch with MPS support (automatically installed via `requirements.txt`)
 
 ---
 

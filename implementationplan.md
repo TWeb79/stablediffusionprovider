@@ -4,7 +4,8 @@
 Create a Docker-based Stable Diffusion service with a FastAPI backend that:
 - Loads models from a central folder (no copying)
 - Provides REST API for image generation
-- Supports GPU acceleration (NVIDIA CUDA) with CPU fallback
+- Runs entirely on CPU when packaged in Docker for Debian 12 slim on ARM
+- Offers a dedicated local runner (run_local.py) that leverages Apple Metal (MPS) when available
 
 ---
 
@@ -78,75 +79,59 @@ Based on RULES_ports.md for project 41:
 
 ## Implementation Steps
 
-### Phase 1: Docker Configuration
-1. **Create Dockerfile**
-   - Base image: `nvidia/cuda:12.1-cudnn8-runtime-ubuntu22.04` (for GPU) or `python:3.10-slim` (CPU-only)
-   - Multi-stage build for smaller image
-   - Install PyTorch with CUDA support
-   - Install diffusers, fastapi, uvicorn, pydantic
+### Phase 1: Implementation Plan & Documentation Updates
+1. Align implementationplan.md, FIX.md, README.md, API.md, and ARCHITECTURE.md with CPU-only Docker deployment plus local Apple MPS runner requirements.
+2. Ensure author attribution remains "Inventions4All - github:TWeb79" across docs.
+3. Document run_local.py usage and the distinction between Docker-on-ARM CPU mode vs. local MPS support.
+
+### Phase 2: Docker & Runtime Configuration
+4. **Dockerfile**
+   - Base image: `debian:12-slim` (mandatory per RULES_coding)
+   - Install Python 3.10+, PyTorch CPU wheels, diffusers, FastAPI stack
+   - Configure optimal CPU runtime flags (OMP_NUM_THREADS etc.)
    - Expose port 8141
 
-2. **Create docker-compose.yml**
-   - Service: `sdprovider`
-   - Volume mount: `./dev/ai/external/_Models/Stable-diffusion/:/models:ro`
-   - GPU access: `deploy.resources.reservations.devices: gpu`
-   - Environment variables for configuration
-   - Health check configuration
+5. **docker-compose.yml**
+   - Service name: `41-sdprovider-api`
+   - Bind mount `./docker/dev/ai/external/_Models/Stable-diffusion/:/models:ro`
+   - CPU-only execution (no GPU devices)
+   - Healthcheck hitting `/health`
 
-### Phase 2: Core Application
-3. **Configuration Management** (`src/core/config.py`)
-   - Load from environment variables and config.yml
-   - Model directory path (default: `/models`)
-   - API settings (host, port 8141, workers)
-   - Generation defaults (steps, guidance, dimensions)
+### Phase 3: Core Application Refactor
+6. **Configuration Management** (`src/core/config.py`)
+   - Default device = `cpu`
+   - Support `DEVICE=cpu|mps|auto` but never `cuda`
+   - Provide CPU thread configuration options
 
-4. **Device Detection** (`src/core/device.py`)
-   - Detect CUDA availability
-   - Fallback to CPU if no GPU
-   - Memory optimization settings
+7. **Device Handling** (`src/core/device.py`)
+   - Remove CUDA detection logic
+   - Support CPU + optional MPS detection for local run
+   - Return deterministic CPU-first DeviceInfo structure
 
-5. **Pipeline Manager** (`src/core/pipeline.py`)
-   - Lazy loading of models
-   - Model switching capability
-   - Memory management (attention slicing, CPU offload)
-   - Scheduler configuration (DPM++ solver)
+8. **Pipeline Manager** (`src/core/pipeline.py`)
+   - Force `torch_dtype=torch.float32`
+   - Apply CPU-friendly optimizations (attention/vae slicing, sequential CPU offload)
+   - Wrap generation in `torch.inference_mode()`
+   - Prevent `.to("cuda")` usage; use `.to("cpu")` or keep on CPU
 
-### Phase 3: API Endpoints
-6. **Health Endpoint** (`/health`)
-   - Service status
-   - Loaded model info
-   - Device info
+9. **run_local.py**
+   - Entry point for local Apple Silicon execution
+   - Detect MPS via `torch.backends.mps.is_available()`
+   - Configure threads, load models once, expose CLI to trigger generation or start API
 
-7. **Models Endpoint** (`/models`)
-   - List available models from mounted folder
-   - Model metadata (filename, size)
-   - Currently loaded model
+### Phase 4: API & Schema Consistency
+10. Update `/health`, `/models`, `/load-model`, `/generate` routes and schemas to reference CPU/MPS devices only.
+11. Ensure routes remain thin; move any remaining business logic to services/core modules if needed.
 
-8. **Generate Endpoint** (`/generate`)
-   - Parameters: prompt, negative_prompt, steps, guidance, width, height, seed, model (optional)
-   - Returns: PNG image stream
-   - Request validation with Pydantic
+### Phase 5: Testing & Validation
+12. Update tests to reflect CPU defaults (e.g., `tests/test_device.py`, `tests/test_api.py`).
+13. Add tests for run_local runner helpers if applicable.
+14. Execute `pytest` (or document reasoning if runtime not available) to confirm CPU-first logic.
 
-### Phase 4: Model Management
-9. **Model Discovery**
-   - Scan `/models` directory for `.safetensors` and `.ckpt` files
-   - Cache model list
-   - Support model selection by filename
-
-10. **Model Loading**
-    - Use `from_single_file()` for .safetensors
-    - Use `from_pretrained()` with safety checker disabled
-    - Configure scheduler (DPM++ for quality)
-
-### Phase 5: Testing & Documentation
-11. **Testing**
-    - Unit tests for config, pipeline, API
-    - Integration test with sample generation
-
-12. **Documentation**
-    - README with setup instructions
-    - API documentation (auto-generated via FastAPI/OpenAPI)
-    - Environment variable reference
+### Phase 6: Documentation & Release Prep
+15. Document CPU tuning tips (thread counts, env vars) in README/API docs.
+16. Add instructions for Docker ARM deployment vs. local MPS run.
+17. Confirm `.gitignore` remains up to date.
 
 ---
 

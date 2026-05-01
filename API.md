@@ -1,7 +1,9 @@
 # Stable Diffusion API Documentation
 
-A FastAPI-based REST API service for Stable Diffusion image generation with GPU acceleration support.
+A FastAPI-based REST API service for Stable Diffusion image generation optimized for CPU-only execution in Docker containers with optional Apple Metal (MPS) acceleration for local macOS runs.
 https://github.com/TWeb79/stablediffusionprovider
+
+**Author:** Inventions4All - github:TWeb79
 
 ## Table of Contents
 
@@ -25,7 +27,8 @@ https://github.com/TWeb79/stablediffusionprovider
 
 The Stable Diffusion API Provider provides a RESTful interface for generating images using Stable Diffusion models. It supports:
 
-- **GPU Acceleration**: NVIDIA CUDA support with automatic fallback to CPU
+- **CPU-only inference** in Docker (Debian 12 slim, ARM64)
+- **Apple Metal (MPS) acceleration** when running locally on macOS
 - **Model Management**: Load, unload, and switch between multiple models
 - **Memory Optimization**: Attention slicing, VAE slicing, and CPU offload options
 - **Flexible Generation**: Configurable steps, guidance scale, dimensions, and seeds
@@ -40,7 +43,7 @@ Models are loaded on-demand and cached in memory. When you request a generation 
 
 The cache is stored in memory until the service restarts. You can explicitly unload models to free memory using the `/models/unload` endpoint.
 
-The default model (if `DEFAULT_MODEL_PATH` environment variable is set) is automatically loaded on the first generation request if no `model_path` is provided.
+The default model (if `DEFAULT_MODEL` environment variable is set) is automatically loaded on the first generation request if no `model_path` is provided.
 
 ---
 
@@ -49,7 +52,7 @@ The default model (if `DEFAULT_MODEL_PATH` environment variable is set) is autom
 ### Using Docker Compose
 
 ```bash
-# Start the service
+# Start the service (CPU-only mode)
 docker-compose -f docker/docker-compose.yml up -d
 
 # Check health
@@ -68,33 +71,30 @@ curl "http://localhost:8141/generate?prompt=a%20futuristic%20city&model_path=/mo
   -o city.png
 ```
 
+### Using run_local.py (macOS with MPS)
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run with MPS acceleration (auto-detected)
+python run_local.py --model-dir ./models --port 8141
+
+# Or force CPU mode
+python run_local.py --device cpu --model-dir ./models
+```
+
 ### Using Python Directly
 
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the server (with optional model path)
-DEFAULT_MODEL_PATH=/models/v1-5-pruned.safetensors python -m src.main
-```
+# Run the server (CPU mode)
+DEVICE=cpu python -m src.main
 
-### Docker Run (Manual)
-
-```bash
-docker run \
-  -v /path/to/your/models:/models \
-  -p 8141:8141 \
-  my-sd-api
-```
-
-**With GPU support:**
-
-```bash
-docker run \
-  --gpus all \
-  -v /path/to/your/models:/models \
-  -p 8141:8141 \
-  my-sd-api
+# Or with MPS (on macOS)
+DEVICE=auto python -m src.main
 ```
 
 ---
@@ -113,10 +113,11 @@ Returns service health status and system information.
   "status": "healthy",
   "timestamp": "2024-01-15T10:30:00Z",
   "loaded_model": "v1-5-pruned.safetensors",
-  "device": "cuda:0",
-  "device_type": "cuda",
-  "cuda_available": true,
-  "cuda_device_count": 1
+  "device": "CPU",
+  "device_type": "cpu",
+  "mps_available": true,
+  "torch_num_threads": 8,
+  "torch_interop_threads": 4
 }
 ```
 
@@ -161,10 +162,10 @@ Loads a specific model into memory by name.
 {
   "success": true,
   "model": "v1-5-pruned.safetensors",
-  "device": "cuda:0",
+  "device": "CPU",
   "memory_optimizations": {
     "attention_slicing": true,
-    "cpu_offload": false
+    "cpu_offload": true
   }
 }
 ```
@@ -197,7 +198,7 @@ Loads a specific model into memory using a full file path. This allows loading m
   "success": true,
   "model_path": "/models/v1-5-pruned.safetensors",
   "model": "v1-5-pruned.safetensors",
-  "device": "cuda:0"
+  "device": "CPU"
 }
 ```
 
@@ -425,11 +426,15 @@ a.click();
 | `API_PORT` | 8141 | Port to bind the API server |
 | `API_WORKERS` | 1 | Number of worker processes |
 | `MODEL_DIR` | /models | Directory containing model files |
-| `DEFAULT_MODEL_PATH` | (none) | Default model path to load (e.g., `/models/default.safetensors`). If not set and no `model_path` is provided per request, the service will auto-detect the first model in `MODEL_DIR`. |
+| `DEFAULT_MODEL` | (none) | Default model to load (e.g., `/models/default.safetensors`). If not set and no `model_path` is provided per request, the service will auto-detect the first model in `MODEL_DIR`. |
 | `SAFETY_CHECKER` | false | Enable safety checker |
-| `DEVICE` | cuda | Compute device (cuda/cpu/auto) |
+| `DEVICE` | cpu | Compute device (cpu/mps/auto). `auto` prefers MPS when available locally. |
 | `ATTENTION_SLICING` | true | Enable attention slicing |
-| `CPU_OFFLOAD` | false | Enable CPU offload |
+| `CPU_OFFLOAD` | true | Enable sequential CPU offload |
+| `TORCH_NUM_THREADS` | (auto) | Number of torch threads |
+| `TORCH_INTEROP_THREADS` | (auto) | Number of torch interop threads |
+| `OMP_NUM_THREADS` | (auto) | OMP thread count |
+| `MKL_NUM_THREADS` | (auto) | MKL thread count |
 | `DEFAULT_STEPS` | 25 | Default inference steps |
 | `DEFAULT_GUIDANCE` | 7.5 | Default guidance scale |
 | `DEFAULT_WIDTH` | 512 | Default image width |
@@ -449,13 +454,15 @@ api:
 
 model:
   directory: "/models"
-  default_model: "/models/v1-5-pruned.safetensors"  # or use DEFAULT_MODEL_PATH env var
+  default_model: "/models/v1-5-pruned.safetensors"
   safety_checker: false
 
 device:
-  device: "auto"  # auto, cuda, cpu, mps
+  device: "auto"  # auto, cpu, mps
   attention_slicing: true
-  cpu_offload: false
+  cpu_offload: true
+  num_threads: 8
+  interop_threads: 4
 
 generation:
   default_steps: 25
@@ -495,7 +502,7 @@ Some errors may include additional details:
 ```json
 {
   "error": "Failed to load model",
-  "detail": "CUDA out of memory"
+  "detail": "Out of memory"
 }
 ```
 
@@ -518,7 +525,7 @@ Some errors may include additional details:
 
 **Generation Failed:**
 ```json
-{"error": "Generation failed: CUDA out of memory"}
+{"error": "Generation failed: Out of memory"}
 ```
 
 **No Model Loaded:**
@@ -530,24 +537,33 @@ Some errors may include additional details:
 
 ## Device Support
 
-### NVIDIA GPU (CUDA)
+### Docker (CPU Only)
 
-For best performance with NVIDIA GPUs:
+For Docker deployments on Apple Silicon or other ARM platforms:
 
 ```bash
-# Using Docker with GPU support
-docker run --gpus all -p 8141:8141 \
-  -v /path/to/models:/models \
-  sdprovider:latest
+# Using Docker Compose (recommended)
+docker-compose -f docker/docker-compose.yml up -d
+
+# Or manually
+docker run -p 8141:8141 \
+  -v /path/to/models:/models:ro \
+  41-sdprovider-api:latest
 ```
 
 ### Apple Silicon (MPS)
 
-On Apple Silicon Macs, the service automatically detects and uses MPS:
+On Apple Silicon Macs running locally (not in Docker), use `run_local.py` for MPS acceleration:
 
 ```bash
-# Set device to auto or mps
-DEVICE=auto python -m src.main
+# Auto-detect MPS (preferred)
+python run_local.py --model-dir ./models
+
+# Force MPS
+python run_local.py --device mps --model-dir ./models
+
+# Force CPU
+python run_local.py --device cpu --model-dir ./models
 ```
 
 ### CPU Only
@@ -557,7 +573,27 @@ For systems without GPU acceleration:
 ```bash
 # Force CPU mode
 DEVICE=cpu python -m src.main
+
+# Or with custom thread settings
+TORCH_NUM_THREADS=8 python -m src.main
 ```
+
+---
+
+## Performance Tips
+
+### CPU Inference
+
+- Keep image sizes at 512x512 or 640x640 for fastest inference
+- Reduce `steps` to 20-25 for quick previews
+- Increase `TORCH_NUM_THREADS` to match physical CPU cores
+- CPU offload is enabled by default to reduce memory usage
+
+### Apple Metal (MPS)
+
+- Use float32 (default) for stability
+- 768x768 images work well on M1/M2 chips
+- Consider reducing steps if generation is slow
 
 ---
 
@@ -579,4 +615,4 @@ Currently, there are no rate limits implemented. For production deployments, con
 
 ## License
 
-This project is licensed under the same terms as the NVIDIA Deep Learning Container License.
+MIT License

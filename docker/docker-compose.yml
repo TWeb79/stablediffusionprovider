@@ -4,17 +4,17 @@
 # =============================================================================
 
 services:
-  sdprovider:
+  41-sdprovider-api:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: sdprovider-api
-    image: sdprovider:latest
+    container_name: 41-sdprovider-api
+    image: 41-sdprovider-api:latest
     ports:
       - "8141:8141"
     volumes:
       # Mount model directory read-only to prevent accidental modifications
-      - ${MODEL_DIR:-./dev/ai/external/_Models/Stable-diffusion}:/models:ro
+      - ${MODEL_DIR:-/Users/torstenweber/dev/ai/external/_Models/Stable-diffusion}:/models:ro
     environment:
       # API Configuration
       - API_HOST=0.0.0.0
@@ -51,8 +51,8 @@ services:
       start_period: 120s
     restart: unless-stopped
     networks:
-      - sdprovider-network
+      - 41-sdprovider-network
 
 networks:
-  sdprovider-network:
+  41-sdprovider-network:
     driver: bridge

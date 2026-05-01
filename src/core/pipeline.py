@@ -1,8 +1,8 @@
 """
 Stable Diffusion Pipeline Manager.
 
-Handles model loading, caching, and image generation.
-Supports lazy loading, model switching, and memory optimization.
+Handles model loading, caching, and image generation for CPU-first deployments
+with optional Apple MPS support during local execution.
 
 Author: Inventions4All - github:TWeb79
 """
@@ -13,15 +13,21 @@ from pathlib import Path
 from typing import Any, Optional
 
 import torch
-from diffusers import (
-    AutoencoderKL,
-    DPMSolverMultistepScheduler,
+from diffusers.pipelines.stable_diffusion.pipeline_output import (
+    StableDiffusionPipelineOutput,
+)
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import (
     StableDiffusionPipeline,
-    UNet2DConditionModel,
+)
+from diffusers.schedulers.scheduling_dpmsolver_multistep import (
+    DPMSolverMultistepScheduler,
 )
 from PIL import Image
 
-from .device import detect_device, optimize_for_device
+from .device import (
+    configure_torch_runtime,
+    detect_device,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +46,11 @@ class PipelineManager:
         device: Optional[str] = None,
         safety_checker: bool = False,
         attention_slicing: bool = True,
-        cpu_offload: bool = False,
+        cpu_offload: bool = True,
+        num_threads: Optional[int] = None,
+        interop_threads: Optional[int] = None,
+        omp_threads: Optional[int] = None,
+        mkl_threads: Optional[int] = None,
         hf_token: Optional[str] = None,
     ):
         """
@@ -48,10 +58,14 @@ class PipelineManager:
         
         Args:
             model_dir: Directory containing model files
-            device: Compute device (cuda/cpu/auto)
+            device: Compute device (cpu/mps/auto)
             safety_checker: Enable safety checker
             attention_slicing: Enable attention slicing for memory savings
             cpu_offload: Enable CPU offload for additional memory savings
+            num_threads: torch.set_num_threads value
+            interop_threads: torch.set_num_interop_threads value
+            omp_threads: OMP_NUM_THREADS value
+            mkl_threads: MKL_NUM_THREADS value
             hf_token: HuggingFace token for gated models
         """
         self.model_dir = Path(model_dir)
@@ -62,6 +76,12 @@ class PipelineManager:
         # Optimization settings
         self.attention_slicing = attention_slicing
         self.cpu_offload = cpu_offload
+        configure_torch_runtime(
+            num_threads=num_threads,
+            interop_threads=interop_threads,
+            omp_threads=omp_threads,
+            mkl_threads=mkl_threads,
+        )
         
         # Pipeline state
         self._pipeline: Optional[StableDiffusionPipeline] = None
@@ -152,7 +172,7 @@ class PipelineManager:
         # Load the pipeline using from_single_file
         self._pipeline = StableDiffusionPipeline.from_single_file(
             str(path),
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            torch_dtype=torch.float32,
             safety_checker=None if not self.safety_checker else None,
             requires_safety_checker=self.safety_checker,
             token=self.hf_token,
@@ -229,11 +249,11 @@ class PipelineManager:
         if self._pipeline is None:
             return
         
-        # Move to device
+        # Move to device (cpu or mps)
         self._pipeline = self._pipeline.to(self.device)
         
         # Attention slicing - reduces memory at slight speed cost
-        if self.attention_slicing:
+        if self.attention_slicing or self.device == "cpu":
             self._pipeline.enable_attention_slicing()
             logger.info("Enabled attention slicing")
         
@@ -241,8 +261,8 @@ class PipelineManager:
         self._pipeline.enable_vae_slicing()
         logger.info("Enabled VAE slicing")
         
-        # CPU offload - significant memory savings, slower
-        if self.cpu_offload:
+        # Sequential CPU offload when explicitly requested (CPU workloads)
+        if self.cpu_offload and self.device == "cpu":
             self._pipeline.enable_sequential_cpu_offload()
             logger.info("Enabled sequential CPU offload")
         
@@ -283,8 +303,8 @@ class PipelineManager:
         if self._pipeline is None:
             raise RuntimeError("No model loaded. Call load_model() first.")
         
-        # Set random seed for reproducibility
-        generator = torch.Generator(device=self.device)
+        # Set random seed for reproducibility (generator kept on CPU for determinism)
+        generator = torch.Generator(device="cpu")
         if seed == 0:
             generator.seed()
         else:
@@ -292,17 +312,24 @@ class PipelineManager:
         
         logger.info(f"Generating image: {width}x{height}, steps={steps}, guidance={guidance}")
         
-        result = self._pipeline(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=steps,
-            guidance_scale=guidance,
-            width=width,
-            height=height,
-            generator=generator,
-        )
+        with torch.inference_mode():
+            result = self._pipeline(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                num_inference_steps=steps,
+                guidance_scale=guidance,
+                width=width,
+                height=height,
+                generator=generator,
+            )
         
-        return result.images[0]
+        if isinstance(result, StableDiffusionPipelineOutput):
+            return result.images[0]
+        # diffusers may return tuple(Image, metadata) on older versions
+        image = result[0] if isinstance(result, tuple) else result
+        if isinstance(image, Image.Image):
+            return image
+        raise RuntimeError("Pipeline returned unexpected image type")
     
     def unload(self) -> None:
         """Unload the current model and free memory."""
@@ -310,10 +337,6 @@ class PipelineManager:
             del self._pipeline
             self._pipeline = None
             self._current_model = None
-            
-            # Clear CUDA cache if using GPU
-            if self.device == "cuda":
-                torch.cuda.empty_cache()
             
             logger.info("Model unloaded and memory freed")
     
@@ -346,6 +369,10 @@ def get_pipeline_manager() -> PipelineManager:
             safety_checker=settings.model.safety_checker,
             attention_slicing=settings.device.attention_slicing,
             cpu_offload=settings.device.cpu_offload,
+            num_threads=settings.device.num_threads,
+            interop_threads=settings.device.interop_threads,
+            omp_threads=settings.device.omp_num_threads,
+            mkl_threads=settings.device.mkl_num_threads,
             hf_token=settings.hf_token,
         )
     

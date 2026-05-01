@@ -1,13 +1,14 @@
 """
-Device detection and management for Stable Diffusion API Service.
+Device detection and runtime configuration utilities for the Stable Diffusion API.
 
-Handles CUDA/CPU device detection with automatic fallback.
-Provides memory optimization settings based on available hardware.
+Docker deployments must run on CPU. Local executions may optionally leverage
+Apple Silicon's Metal Performance Shaders (MPS) backend when available.
 
 Author: Inventions4All - github:TWeb79
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -18,99 +19,69 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DeviceInfo:
-    """
-    Information about the compute device being used.
-    
-    Attributes:
-        name: Human-readable device name
-        type: Device type (cuda/cpu)
-        memory_total: Total VRAM/RAM in bytes (None if unknown)
-        memory_available: Available memory in bytes (None if unknown)
-        cuda_available: Whether CUDA is available
-        cuda_device_count: Number of available CUDA devices
-    """
+    """Information about the compute device being used."""
     
     name: str
     type: str
     memory_total: Optional[int] = None
     memory_available: Optional[int] = None
-    cuda_available: bool = False
-    cuda_device_count: int = 0
+    mps_available: bool = False
+    num_threads: Optional[int] = None
+    interop_threads: Optional[int] = None
 
 
 def detect_device(preferred_device: Optional[str] = None) -> str:
-    """
-    Detect and return the best available compute device.
-    
-    Args:
-        preferred_device: User-specified device preference (cuda/cpu/mps/auto)
-        
-    Returns:
-        Device string ('cuda', 'mps', or 'cpu')
-    """
-    if preferred_device and preferred_device in ("cuda", "cpu", "mps"):
-        if preferred_device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA requested but not available, falling back to CPU")
-            return "cpu"
-        if preferred_device == "mps" and not torch.backends.mps.is_available():
-            logger.warning("MPS requested but not available, falling back to CPU")
-            return "cpu"
-        return preferred_device
-    
-    # Auto-detect: prefer CUDA if available, then MPS, then CPU
-    if torch.cuda.is_available():
-        device_name = torch.cuda.get_device_name(0)
-        logger.info(f"CUDA available: {device_name}")
-        return "cuda"
-    
-    # Check for Apple Silicon MPS support
+    """Detect and return the best available compute device (cpu/mps)."""
+    allowed = {"cpu", "mps", "auto", None}
+    if preferred_device not in allowed:
+        logger.warning("Unsupported device '%s', forcing CPU", preferred_device)
+        return "cpu"
+
+    if preferred_device == "mps":
+        if torch.backends.mps.is_available():
+            logger.info("Using Apple MPS backend")
+            return "mps"
+        logger.warning("MPS requested but not available, falling back to CPU")
+        return "cpu"
+
+    if preferred_device == "cpu":
+        return "cpu"
+
+    # Auto mode: prefer MPS when available, else CPU
     if torch.backends.mps.is_available():
-        logger.info("MPS (Apple Silicon) available")
+        logger.info("Auto-detected MPS backend")
         return "mps"
-    
-    logger.info("Using CPU")
+
+    logger.info("Auto-detected CPU backend")
     return "cpu"
 
 
 def get_device_info(device: Optional[str] = None) -> DeviceInfo:
-    """
-    Get detailed information about the compute device.
-    
-    Args:
-        device: Device to query (defaults to auto-detect)
-        
-    Returns:
-        DeviceInfo with hardware details
-    """
+    """Get detailed information about the compute device."""
     if device is None:
         device = detect_device()
-    
-    cuda_available = torch.cuda.is_available()
-    cuda_device_count = torch.cuda.device_count() if cuda_available else 0
-    
-    if device == "cuda" and cuda_available:
-        # Get CUDA device properties
-        props = torch.cuda.get_device_properties(0)
-        memory_total = props.total_memory
-        memory_available = torch.cuda.mem_get_info()[0] if hasattr(torch.cuda, 'mem_get_info') else None
-        
+
+    mps_available = torch.backends.mps.is_available()
+
+    if device == "mps" and mps_available:
         return DeviceInfo(
-            name=torch.cuda.get_device_name(0),
-            type="cuda",
-            memory_total=memory_total,
-            memory_available=memory_available,
-            cuda_available=True,
-            cuda_device_count=cuda_device_count,
+            name="Apple Metal (MPS)",
+            type="mps",
+            memory_total=None,
+            memory_available=None,
+            mps_available=True,
+            num_threads=torch.get_num_threads(),
+            interop_threads=torch.get_num_interop_threads(),
         )
-    
-    # CPU info
+
     return DeviceInfo(
         name="CPU",
         type="cpu",
         memory_total=None,
         memory_available=None,
-        cuda_available=cuda_available,
-        cuda_device_count=cuda_device_count,
+        mps_available=mps_available,
+        num_threads=torch.get_num_threads(),
+        interop_threads=torch.get_num_interop_threads(),
     )
 
 
@@ -150,28 +121,36 @@ def get_memory_requirements(width: int, height: int, model_size_gb: float = 4.0)
     }
 
 
-def optimize_for_device(device: str, attention_slicing: bool = True, cpu_offload: bool = False) -> dict:
-    """
-    Get optimization settings for the specified device.
-    
-    Args:
-        device: Target device (cuda/cpu/mps)
-        attention_slicing: Enable attention slicing for memory savings
-        cpu_offload: Enable CPU offload for additional memory savings
-        
-    Returns:
-        Dictionary of optimization flags
-    """
-    # For GPU devices (cuda/mps), use user settings; for CPU, always enable optimizations
-    is_gpu = device in ("cuda", "mps")
-    
+def optimize_for_device(device: str, attention_slicing: bool = True, cpu_offload: bool = True) -> dict:
+    """Return optimization settings for the specified device."""
+    is_mps = device == "mps"
     settings = {
         "device": device,
-        "attention_slicing": attention_slicing if is_gpu else True,
-        "cpu_offload": cpu_offload if is_gpu else True,
-        "enable_vae_slicing": attention_slicing if is_gpu else True,
-        "enable_sequential_cpu_offload": cpu_offload if is_gpu else True,
+        "attention_slicing": True if not is_mps else attention_slicing,
+        "cpu_offload": cpu_offload if device == "cpu" else False,
+        "enable_vae_slicing": True,
+        "enable_sequential_cpu_offload": cpu_offload if device == "cpu" else False,
     }
-    
-    logger.info(f"Device optimization settings: {settings}")
+    logger.info("Device optimization settings: %s", settings)
     return settings
+
+
+def configure_torch_runtime(
+    num_threads: Optional[int] = None,
+    interop_threads: Optional[int] = None,
+    omp_threads: Optional[int] = None,
+    mkl_threads: Optional[int] = None,
+) -> None:
+    """Configure torch and environment thread settings for optimal CPU usage."""
+    if num_threads:
+        torch.set_num_threads(num_threads)
+        logger.info("Set torch.set_num_threads(%s)", num_threads)
+    if interop_threads:
+        torch.set_num_interop_threads(interop_threads)
+        logger.info("Set torch.set_num_interop_threads(%s)", interop_threads)
+    if omp_threads:
+        os.environ["OMP_NUM_THREADS"] = str(omp_threads)
+        logger.info("Set OMP_NUM_THREADS=%s", omp_threads)
+    if mkl_threads:
+        os.environ["MKL_NUM_THREADS"] = str(mkl_threads)
+        logger.info("Set MKL_NUM_THREADS=%s", mkl_threads)

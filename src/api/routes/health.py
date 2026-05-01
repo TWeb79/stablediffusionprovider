@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from ...schemas.health import HealthResponse
-from ...core.device import get_device_info
-from ...core.pipeline import get_pipeline_manager
+from src.schemas.health import HealthResponse
+from src.core.device import get_device_info
+from src.core.pipeline import get_pipeline_manager
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ async def health_check() -> HealthResponse:
         loaded_model=pipeline_manager.current_model,
         device=device_info.name,
         device_type=device_info.type,
-        cuda_available=device_info.cuda_available,
-        cuda_device_count=device_info.cuda_device_count,
+        mps_available=device_info.mps_available,
+        torch_num_threads=device_info.num_threads or 0,
+        torch_interop_threads=device_info.interop_threads or 0,
     )
