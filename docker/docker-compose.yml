@@ -1,0 +1,64 @@
+# =============================================================================
+# Stable Diffusion API Service - Docker Compose
+# Author: Inventions4All - github:TWeb79
+# =============================================================================
+
+services:
+  sdprovider:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: sdprovider-api
+    image: sdprovider:latest
+    ports:
+      - "8141:8141"
+    volumes:
+      # Mount model directory read-only to prevent accidental modifications
+      - ${MODEL_DIR:-./dev/ai/external/_Models/Stable-diffusion}:/models:ro
+    environment:
+      # API Configuration
+      - API_HOST=0.0.0.0
+      - API_PORT=8141
+      - API_WORKERS=1
+      
+      # Model Configuration
+      - MODEL_DIR=/models
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-}
+      - SAFETY_CHECKER=false
+      
+      # Device Configuration
+      - DEVICE=${DEVICE:-cuda}
+      - ATTENTION_SLICING=true
+      - CPU_OFFLOAD=false
+      
+      # Generation Defaults
+      - DEFAULT_STEPS=${DEFAULT_STEPS:-25}
+      - DEFAULT_GUIDANCE=${DEFAULT_GUIDANCE:-7.5}
+      - DEFAULT_WIDTH=${DEFAULT_WIDTH:-512}
+      - DEFAULT_HEIGHT=${DEFAULT_HEIGHT:-512}
+      
+      # HuggingFace Token (optional, for gated models)
+      - HF_TOKEN=${HF_TOKEN:-}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8141/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+    networks:
+      - sdprovider-network
+
+networks:
+  sdprovider-network:
+    driver: bridge
