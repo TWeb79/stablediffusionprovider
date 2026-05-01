@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator,ConfigDict
 
 
 class APISettings(BaseModel):
@@ -76,7 +76,8 @@ class Settings(BaseModel):
     Loads from environment variables with fallback to config.yml.
     Environment variables take precedence over config file values.
     """
-    
+    model_config = ConfigDict(protected_namespaces=())
+
     # Flat env var fields for API settings
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8141, alias="API_PORT")

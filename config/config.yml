@@ -17,9 +17,9 @@ model:
 
 # Device Configuration
 device:
-  device: "cuda"
+  device: "cpu"
   attention_slicing: true
-  cpu_offload: false
+  cpu_offload: true
 
 # Default Generation Parameters
 generation:

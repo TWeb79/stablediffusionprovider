@@ -19,13 +19,16 @@ The SDProvider is a Docker-based REST API service for Stable Diffusion image gen
 │         ▼                  ▼                                 │
 │  ┌─────────────┐    ┌─────────────┐                         │
 │  │   Config    │    │   Model     │◀─── Volume Mount ───┐   │
-│  │  (env/yml)  │    │   Cache     │                    │   │
+│  │  (env/yml)  │    │   Cache     │                   │   │
 │  └─────────────┘    └─────────────┘    ┌────────────────┴───┤
-└─────────────────────────────────────────│ Host Model Folder │
-                                          │ ./dev/ai/external │
-                                          │ /_Models/Stable-  │
-                                          │ diffusion/        │
-                                          └───────────────────┘
+└─────────────────────────────────────────│ Host Models:    │
+                                           │  Default       │
+                                           │  /models/default.safetensors
+                                           │  Explicit      │
+                                           │  /models/explicit.safetensors
+                                           │  Host path:    │
+                                           │  ./dev/ai/external/_Models/Stable-diffusion/
+                                           └───────────────────┘
 ```
 
 ---
@@ -101,11 +104,12 @@ API layer - depends on core layer.
 - Dependency injection helpers
 
 ### `src/schemas/`
+
 Pydantic models for request/response validation.
 
 - `health.py` - Health check response schema
 - `model.py` - Model info and list schemas
-- `generate.py` - Generation request/response schemas
+- `generate.py` - Generation request/response schemas (supports explicit content model selection)
 - `load.py` - Load model request schema
 
 ---
@@ -117,10 +121,12 @@ Pydantic models for request/response validation.
 ```
 1. Client sends request to /generate
    │
-2. FastAPI validates request parameters
+2. FastAPI validates request parameters (including explicit flag)
    │
-3. PipelineManager checks if model is loaded
-   │   └── If not loaded, auto-detect and load first model
+3. PipelineManager checks if target model is loaded
+   │   ├── If explicit=true, uses /models/explicit.safetensors
+   │   ├── If model_path provided, uses that path
+   │   └── Otherwise uses configured default model
    │
 4. Generate image using SD pipeline
    │   - Set random seed for reproducibility

@@ -58,6 +58,10 @@ class GenerateRequest(BaseModel):
         default=None,
         description="Full path to model file (e.g., /models/model.safetensors). If not provided, uses default model.",
     )
+    explicit: bool = Field(
+        default=False,
+        description="Use explicit content model instead of default model",
+    )
     
     @field_validator("width", "height")
     @classmethod

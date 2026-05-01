@@ -137,6 +137,7 @@ GET /generate?prompt=a beautiful landscape
 | height | int | 512 | Image height (256-1024, multiple of 8) |
 | seed | int | 0 | Random seed (0 = random) |
 | model | string | null | Optional model name to use |
+| explicit | bool | false | Use explicit content model instead of default (requires /models/explicit.safetensors) |
 
 **Response:** PNG image binary
 
@@ -148,6 +149,9 @@ curl -o output.png "http://localhost:8141/generate?prompt=a%20beautiful%20sunset
 
 # With negative prompt
 curl -o output.png "http://localhost:8141/generate?prompt=a%20cat&negative_prompt=blurry&steps=25"
+
+# Using explicit content model
+curl -o output.png "http://localhost:8141/generate?prompt=a%20landscape&explicit=true"
 ```
 
 ---

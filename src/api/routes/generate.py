@@ -34,6 +34,7 @@ async def generate_image_get(
     height: int = 512,
     seed: int = 0,
     model_path: str | None = None,
+    explicit: bool = False,
 ) -> StreamingResponse:
     """
     Generate an image from a text prompt using query parameters.
@@ -47,6 +48,7 @@ async def generate_image_get(
         height: Image height (256-1024, must be multiple of 8)
         seed: Random seed (0 = random)
         model_path: Full path to model file (optional)
+        explicit: Use explicit content model instead of default
         
     Returns:
         PNG image stream
@@ -63,6 +65,7 @@ async def generate_image_get(
         height=height,
         seed=seed,
         model_path=model_path,
+        explicit=explicit,
     )
 
 
@@ -90,6 +93,7 @@ async def generate_image_json(request: GenerateRequest) -> StreamingResponse:
         height=request.height,
         seed=request.seed,
         model_path=request.model_path,
+        explicit=request.explicit,
     )
 
 
@@ -102,6 +106,7 @@ async def _generate_image(
     height: int = 512,
     seed: int = 0,
     model_path: str | None = None,
+    explicit: bool = False,
 ) -> StreamingResponse:
     """
     Internal function to generate an image.
@@ -115,6 +120,7 @@ async def _generate_image(
         height: Image height (256-1024, must be multiple of 8)
         seed: Random seed (0 = random)
         model_path: Full path to model file (optional)
+        explicit: Use explicit content model instead of default
         
     Returns:
         PNG image stream
@@ -131,23 +137,32 @@ async def _generate_image(
     
     pipeline_manager = get_pipeline_manager()
     
+    # Determine which model to use based on explicit flag
+    final_model_path = model_path
+    if not final_model_path and explicit:
+        final_model_path = "/models/explicit.safetensors"
+    elif not final_model_path:
+        from ..core.config import get_settings
+        settings = get_settings()
+        final_model_path = settings.model.default_model
+    
     # Validate model_path if provided
-    if model_path and not os.path.isfile(model_path):
-        logger.error(f"Model file not found at path: {model_path}")
+    if final_model_path and not os.path.isfile(final_model_path):
+        logger.error(f"Model file not found at path: {final_model_path}")
         raise HTTPException(
             status_code=400,
-            detail={"error": f"Model file not found at path: {model_path}"},
+            detail={"error": f"Model file not found at path: {final_model_path}"},
         )
     
     # Load model if not already loaded or if different model requested
-    if not pipeline_manager.is_loaded or (model_path and model_path != pipeline_manager.current_model):
+    if not pipeline_manager.is_loaded or (final_model_path and final_model_path != pipeline_manager.current_model):
         try:
-            pipeline_manager.load_model(model_path)
+            pipeline_manager.load_model(final_model_path)
         except FileNotFoundError as e:
             logger.error(f"Model file not found: {e}")
             raise HTTPException(
                 status_code=400,
-                detail={"error": f"Model file not found at path: {model_path}"},
+                detail={"error": f"Model file not found at path: {final_model_path}"},
             )
         except Exception as e:
             logger.error(f"Failed to load model: {e}")

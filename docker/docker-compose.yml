@@ -13,8 +13,11 @@ services:
     ports:
       - "8141:8141"
     volumes:
-      # Mount model directory read-only to prevent accidental modifications
-      - ${MODEL_DIR:-/Users/torstenweber/dev/ai/external/_Models/Stable-diffusion}:/models:ro
+      # Mount individual model files to fixed container paths for consistent access
+      # Default model (general purpose)
+      - ${SD_MODEL_DEFAULT:-/Users/torstenweber/dev/ai/external/_Models/Stable-diffusion/dreamshaperXL_lightningDPMSDE.safetensors}:/models/default.safetensors:ro
+      # Explicit content model (filtered/tuned variant)
+      - ${SD_MODEL_EXPLICIT:-/Users/torstenweber/dev/ai/external/_Models/Stable-diffusion/mzui_10_of_10_dreamshaperXL_lightningDPMSDE.safetensors}:/models/explicit.safetensors:ro
     environment:
       # API Configuration
       - API_HOST=0.0.0.0
@@ -22,8 +25,7 @@ services:
       - API_WORKERS=1
       
       # Model Configuration
-      - MODEL_DIR=/models
-      - DEFAULT_MODEL=${DEFAULT_MODEL:-}
+      - DEFAULT_MODEL=/models/default.safetensors
       - SAFETY_CHECKER=false
       
       # Device Configuration

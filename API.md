@@ -256,6 +256,7 @@ The generate endpoint supports two methods: GET (query parameters) and POST (JSO
 | `height` | integer | 512 | Image height (256-1024, must be multiple of 8) |
 | `seed` | integer | 0 | Random seed (0 = random) |
 | `model_path` | string | null | Full path to model file (e.g., /models/model.safetensors) |
+| `explicit` | boolean | false | Use explicit content model instead of default (requires /models/explicit.safetensors) |
 
 **Response:** PNG image binary
 

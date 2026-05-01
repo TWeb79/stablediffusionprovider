@@ -17,6 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import generate, health, load, models
 from src.core.config import get_settings
 
+import warnings
+import logging
+
+# Suppress noisy deprecation warnings from older diffusers/transformers builds
+warnings.filterwarnings(
+    "ignore",
+    message="torch.utils._pytree._register_pytree_node is deprecated",
+)
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

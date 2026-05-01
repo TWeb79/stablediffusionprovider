@@ -167,17 +167,41 @@ class TestGenerateEndpoint:
         mock_pm.load_model = MagicMock()
         mock_pm.current_model = "test_model.safetensors"
         mock_pipeline.return_value = mock_pm
-        
+
         # Mock the generate method to return a fake image
         mock_image = MagicMock()
         mock_image.save = MagicMock()
         mock_pm.generate = MagicMock(return_value=mock_image)
-        
+
         with TestClient(app) as test_client:
             response = test_client.get("/generate?prompt=a cat")
-        
+
         # Should attempt to load model first
         mock_pm.load_model.assert_called_once()
+
+    @patch("src.api.routes.generate.get_pipeline_manager")
+    def test_generate_with_explicit_flag(self, mock_pipeline):
+        """Test generation with explicit flag uses explicit model."""
+        mock_pm = MagicMock()
+        mock_pm.is_loaded = False
+        mock_pm.load_model = MagicMock()
+        mock_pm.current_model = "test_model.safetensors"
+        mock_pipeline.return_value = mock_pm
+
+        mock_image = MagicMock()
+        mock_image.save = MagicMock()
+        mock_pm.generate = MagicMock(return_value=mock_image)
+
+        with TestClient(app) as test_client:
+            response = test_client.post(
+                "/generate",
+                json={
+                    "prompt": "test",
+                    "explicit": True,
+                }
+            )
+
+        assert response.status_code == 200
 
 
 class TestSchemaValidation:
