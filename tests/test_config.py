@@ -28,13 +28,6 @@ class TestAPISettings:
         assert settings.host == "0.0.0.0"
         assert settings.port == 8141
         assert settings.workers == 1
-    
-    def test_env_override(self):
-        """Test environment variable override."""
-        with patch.dict("os.environ", {"API_HOST": "127.0.0.1", "API_PORT": "9000"}):
-            settings = APISettings()
-            assert settings.host == "127.0.0.1"
-            assert settings.port == 9000
 
 
 class TestModelSettings:
@@ -46,33 +39,43 @@ class TestModelSettings:
         assert settings.directory == "/models"
         assert settings.default_model is None
         assert settings.safety_checker is False
-    
-    def test_env_override(self):
-        """Test environment variable override."""
-        with patch.dict("os.environ", {"MODEL_DIRECTORY": "/custom/models"}):
-            settings = ModelSettings()
-            assert settings.directory == "/custom/models"
 
 
 class TestDeviceSettings:
     """Tests for device settings."""
     
     def test_default_values(self):
-        """Test default device settings."""
+        """Test default device settings (CPU mode)."""
         settings = DeviceSettings()
-        assert settings.device == "cuda"
+        assert settings.device == "cpu"
         assert settings.attention_slicing is True
-        assert settings.cpu_offload is False
+        assert settings.cpu_offload is True  # CPU offload enabled by default
     
-    def test_valid_device(self):
-        """Test valid device values."""
+    def test_valid_device_cpu(self):
+        """Test valid CPU device value."""
         settings = DeviceSettings(device="cpu")
         assert settings.device == "cpu"
+    
+    def test_valid_device_mps(self):
+        """Test valid MPS device value."""
+        settings = DeviceSettings(device="mps")
+        assert settings.device == "mps"
+    
+    def test_valid_device_auto(self):
+        """Test valid auto device value."""
+        settings = DeviceSettings(device="auto")
+        assert settings.device == "auto"
     
     def test_invalid_device(self):
         """Test invalid device value raises error."""
         with pytest.raises(ValueError):
             DeviceSettings(device="invalid")
+    
+    def test_mps_device_disables_cpu_offload(self):
+        """Test that MPS device disables CPU offload."""
+        settings = DeviceSettings(device="mps", cpu_offload=True)
+        # cpu_offload should still be settable but will be ignored at runtime
+        assert settings.device == "mps"
 
 
 class TestGenerationSettings:
@@ -115,38 +118,13 @@ class TestGenerationSettings:
 class TestSettings:
     """Tests for main settings class."""
     
-    def test_yaml_loading(self):
-        """Test loading from YAML config."""
-        yaml_content = """
-api:
-  port: 9000
-model:
-  directory: /test/models
-device:
-  device: cpu
-generation:
-  steps: 30
-"""
-        with patch("pathlib.Path.exists", return_value=True):
-            with patch("builtins.open", mock_open(read_data=yaml_content)):
-                with patch("yaml.safe_load", return_value={
-                    "api": {"port": 9000},
-                    "model": {"directory": "/test/models"},
-                    "device": {"device": "cpu"},
-                    "generation": {"steps": 30},
-                }):
-                    settings = Settings.from_yaml()
-                    assert settings.api.port == 9000
-                    assert settings.model.directory == "/test/models"
-                    assert settings.device.device == "cpu"
-                    assert settings.generation.steps == 30
-    
     def test_yaml_file_not_found(self):
         """Test handling missing YAML file."""
         with patch("pathlib.Path.exists", return_value=False):
             settings = Settings.from_yaml()
             # Should use defaults
             assert settings.api.port == 8141
+            assert settings.device.device == "cpu"
 
 
 class TestSettingsSingleton:

@@ -44,13 +44,13 @@ class TestHealthEndpoint:
         mock_pipeline.return_value = MagicMock(
             current_model="test_model.safetensors"
         )
-        mock_device_info.return_value = MagicMock(
-            name="CPU",
-            type="cpu",
-            mps_available=False,
-            num_threads=8,
-            interop_threads=4,
-        )
+        # Create a proper DeviceInfo-like object
+        mock_device_info.return_value = MagicMock()
+        mock_device_info.return_value.name = "CPU"
+        mock_device_info.return_value.type = "cpu"
+        mock_device_info.return_value.mps_available = False
+        mock_device_info.return_value.num_threads = 8
+        mock_device_info.return_value.interop_threads = 4
         
         response = client.get("/health")
         
@@ -107,7 +107,7 @@ class TestModelsEndpoint:
             current_model="test_model.safetensors",
             device="cpu",
             attention_slicing=True,
-            cpu_offload=False,
+            cpu_offload=True,
         )
         
         response = client.post("/models/test_model.safetensors/load")
@@ -144,23 +144,23 @@ class TestModelsEndpoint:
 class TestGenerateEndpoint:
     """Tests for image generation endpoint."""
     
-    @patch("src.api.routes.generate.get_pipeline_manager")
-    def test_generate_requires_prompt(self, client):
+    def test_generate_requires_prompt(self):
         """Test that prompt is required."""
-        response = client.get("/generate")
-        
-        assert response.status_code == 422  # Validation error
+        with TestClient(app) as test_client:
+            response = test_client.get("/generate")
+            
+            assert response.status_code == 422  # Validation error
     
-    @patch("src.api.routes.generate.get_pipeline_manager")
-    def test_invalid_dimensions(self, client):
+    def test_invalid_dimensions(self):
         """Test that dimensions must be multiples of 8."""
-        response = client.get("/generate?prompt=test&width=500")
-        
-        assert response.status_code == 400
-        assert "multiples of 8" in response.json()["detail"]
+        with TestClient(app) as test_client:
+            response = test_client.get("/generate?prompt=test&width=500")
+            
+            assert response.status_code == 400
+            assert "multiples of 8" in response.json()["detail"]
     
     @patch("src.api.routes.generate.get_pipeline_manager")
-    def test_generate_without_loaded_model(self, mock_pipeline, client):
+    def test_generate_without_loaded_model(self, mock_pipeline):
         """Test generation auto-loads model if not loaded."""
         mock_pm = MagicMock()
         mock_pm.is_loaded = False
@@ -173,7 +173,8 @@ class TestGenerateEndpoint:
         mock_image.save = MagicMock()
         mock_pm.generate = MagicMock(return_value=mock_image)
         
-        response = client.get("/generate?prompt=a cat")
+        with TestClient(app) as test_client:
+            response = test_client.get("/generate?prompt=a cat")
         
         # Should attempt to load model first
         mock_pm.load_model.assert_called_once()

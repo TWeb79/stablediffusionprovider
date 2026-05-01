@@ -232,3 +232,9 @@ MIT License
 ## Author
 
 Inventions4All - github:TWeb79
+
+---
+
+### Docker Deploy
+docker-compose -f docker/docker-compose.yml build --no-cache
+docker-compose -f docker/docker-compose.yml up -d

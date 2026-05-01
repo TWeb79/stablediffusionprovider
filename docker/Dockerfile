@@ -35,6 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+
+
 # -----------------------------------------------------------------------------
 # Python setup (venv instead of --break-system-packages)
 # -----------------------------------------------------------------------------
@@ -54,11 +56,13 @@ RUN pip install \
 # Install application dependencies
 # -----------------------------------------------------------------------------
 RUN pip install \
+    "numpy<2" \          
     diffusers==0.25.0 \
     transformers==4.36.0 \
     accelerate==0.25.0 \
     safetensors==0.4.1 \
     "huggingface_hub<0.20" \
+    omegaconf==2.3.0 \   
     fastapi==0.109.0 \
     uvicorn[standard]==0.27.0 \
     pydantic==2.5.3 \
