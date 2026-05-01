@@ -42,16 +42,16 @@ class ModelSettings(BaseSettings):
 class DeviceSettings(BaseSettings):
     """Device configuration settings."""
     
-    device: str = Field(default="cuda", description="Compute device (cuda/cpu)")
+    device: str = Field(default="cuda", description="Compute device (cuda/cpu/mps)")
     attention_slicing: bool = Field(default=True, description="Enable attention slicing")
     cpu_offload: bool = Field(default=False, description="Enable CPU offload")
     
     @field_validator("device")
     @classmethod
     def validate_device(cls, v: str) -> str:
-        """Validate device is either cuda or cpu."""
-        if v not in ("cuda", "cpu"):
-            raise ValueError("Device must be 'cuda' or 'cpu'")
+        """Validate device is either cuda, cpu, or mps."""
+        if v not in ("cuda", "cpu", "mps"):
+            raise ValueError("Device must be 'cuda', 'cpu', or 'mps'")
         return v
     
     class Config:

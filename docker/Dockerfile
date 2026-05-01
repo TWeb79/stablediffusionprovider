@@ -17,12 +17,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install PyTorch with CUDA 12.1 support
-# Note: CUDA 12.1 index has torch up to 2.0.1
-RUN pip install --no-cache-dir \
-    torch==2.0.1 \
-    torchvision==0.15.2 \
-    --index-url https://download.pytorch.org/whl/cu121
+# Install PyTorch (CPU version - MPS support on Apple Silicon handled at runtime)
+# Using --index-url for CPU-only version to avoid CUDA dependencies
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.2.2 \
+    torchvision==0.17.2
 
 # Install core dependencies
 RUN pip install --no-cache-dir \
@@ -34,7 +33,7 @@ RUN pip install --no-cache-dir \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Minimal production image
 # -----------------------------------------------------------------------------
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04 AS runtime
+FROM python:3.10-slim AS runtime
 
 # Set environment variables for Python
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -64,7 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Upgrade pip in the runtime stage
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Copy Python packages from builder
+# Copy Python packages from builder (includes torch, torchvision, diffusers, etc.)
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 

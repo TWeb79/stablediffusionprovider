@@ -43,24 +43,32 @@ def detect_device(preferred_device: Optional[str] = None) -> str:
     Detect and return the best available compute device.
     
     Args:
-        preferred_device: User-specified device preference (cuda/cpu/auto)
+        preferred_device: User-specified device preference (cuda/cpu/mps/auto)
         
     Returns:
-        Device string ('cuda' or 'cpu')
+        Device string ('cuda', 'mps', or 'cpu')
     """
-    if preferred_device and preferred_device in ("cuda", "cpu"):
+    if preferred_device and preferred_device in ("cuda", "cpu", "mps"):
         if preferred_device == "cuda" and not torch.cuda.is_available():
             logger.warning("CUDA requested but not available, falling back to CPU")
             return "cpu"
+        if preferred_device == "mps" and not torch.backends.mps.is_available():
+            logger.warning("MPS requested but not available, falling back to CPU")
+            return "cpu"
         return preferred_device
     
-    # Auto-detect: prefer CUDA if available
+    # Auto-detect: prefer CUDA if available, then MPS, then CPU
     if torch.cuda.is_available():
         device_name = torch.cuda.get_device_name(0)
         logger.info(f"CUDA available: {device_name}")
         return "cuda"
     
-    logger.info("CUDA not available, using CPU")
+    # Check for Apple Silicon MPS support
+    if torch.backends.mps.is_available():
+        logger.info("MPS (Apple Silicon) available")
+        return "mps"
+    
+    logger.info("Using CPU")
     return "cpu"
 
 
@@ -147,19 +155,22 @@ def optimize_for_device(device: str, attention_slicing: bool = True, cpu_offload
     Get optimization settings for the specified device.
     
     Args:
-        device: Target device (cuda/cpu)
+        device: Target device (cuda/cpu/mps)
         attention_slicing: Enable attention slicing for memory savings
         cpu_offload: Enable CPU offload for additional memory savings
         
     Returns:
         Dictionary of optimization flags
     """
+    # For GPU devices (cuda/mps), use user settings; for CPU, always enable optimizations
+    is_gpu = device in ("cuda", "mps")
+    
     settings = {
         "device": device,
-        "attention_slicing": attention_slicing if device == "cuda" else True,
-        "cpu_offload": cpu_offload if device == "cuda" else False,
-        "enable_vae_slicing": attention_slicing if device == "cuda" else True,
-        "enable_sequential_cpu_offload": cpu_offload if device == "cuda" else True,
+        "attention_slicing": attention_slicing if is_gpu else True,
+        "cpu_offload": cpu_offload if is_gpu else True,
+        "enable_vae_slicing": attention_slicing if is_gpu else True,
+        "enable_sequential_cpu_offload": cpu_offload if is_gpu else True,
     }
     
     logger.info(f"Device optimization settings: {settings}")

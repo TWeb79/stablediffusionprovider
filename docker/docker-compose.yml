@@ -27,7 +27,8 @@ services:
       - SAFETY_CHECKER=false
       
       # Device Configuration
-      - DEVICE=${DEVICE:-cuda}
+      # Note: For Docker on Apple Silicon (M-series Macs), use 'cpu' as MPS is not available in Linux containers
+      - DEVICE=${DEVICE:-cpu}
       - ATTENTION_SLICING=true
       - CPU_OFFLOAD=false
       
@@ -42,13 +43,6 @@ services:
       
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8141/health"]
       interval: 30s
