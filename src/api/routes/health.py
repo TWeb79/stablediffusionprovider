@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 
-from ..schemas.health import HealthResponse
+from ...schemas.health import HealthResponse
 from ...core.device import get_device_info
 from ...core.pipeline import get_pipeline_manager
 

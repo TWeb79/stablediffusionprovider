@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api.routes import generate, health, models
+from .api.routes import generate, health, load, models
 from .core.config import get_settings
 
 # Configure logging
@@ -71,6 +71,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router)
+app.include_router(load.router)
 app.include_router(models.router)
 app.include_router(generate.router)
 

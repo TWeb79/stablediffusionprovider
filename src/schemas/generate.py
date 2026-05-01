@@ -54,9 +54,9 @@ class GenerateRequest(BaseModel):
         ge=0,
         description="Random seed (0 = random)",
     )
-    model: str | None = Field(
+    model_path: str | None = Field(
         default=None,
-        description="Model name to use (optional)",
+        description="Full path to model file (e.g., /models/model.safetensors). If not provided, uses default model.",
     )
     
     @field_validator("width", "height")

@@ -20,7 +20,6 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from PIL import Image
-from safetensors.torch import load_file
 
 from .device import detect_device, optimize_for_device
 
@@ -112,133 +111,118 @@ class PipelineManager:
         logger.info(f"Discovered {len(models)} models in {self.model_dir}")
         return models
     
-    def load_model(self, model_name: Optional[str] = None) -> StableDiffusionPipeline:
+    def load_model(self, model_path: Optional[str] = None) -> StableDiffusionPipeline:
         """
         Load a Stable Diffusion model into the pipeline.
-        
+
         Args:
-            model_name: Name of the model file to load. If None, auto-detects first model.
-            
+            model_path: Full path to model file (e.g., "/models/model.safetensors")
+                or model name (e.g., "model.safetensors"). If None, uses default
+                model from settings or auto-detects.
+
         Returns:
             Loaded StableDiffusionPipeline instance
-            
+
         Raises:
-            FileNotFoundError: If specified model doesn't exist
-            ValueError: If no models found and none specified
+            FileNotFoundError: If specified model file doesn't exist
+            ValueError: If no model path provided and no default found
         """
+        # Resolve the model identifier to an actual file path
+        path = self._resolve_model_path(model_path)
+        model_key = model_path if model_path else str(path)
+
+        # Validate file exists (should be guaranteed by _resolve_model_path)
+        if not path.exists() or not path.is_file():
+            raise FileNotFoundError(f"Model file not found at path: {model_key}")
+
         # If same model already loaded, return it
-        if model_name and self._current_model == model_name and self._pipeline:
-            logger.info(f"Model {model_name} already loaded")
+        if self._current_model == model_key and self._pipeline:
+            logger.info(f"Model {model_key} already loaded")
             return self._pipeline
-        
+
         # Check cache first
-        if model_name and model_name in self._model_cache:
-            logger.info(f"Loading {model_name} from cache")
-            self._pipeline = self._model_cache[model_name]
-            self._current_model = model_name
+        if model_key in self._model_cache:
+            logger.info(f"Loading {model_key} from cache")
+            self._pipeline = self._model_cache[model_key]
+            self._current_model = model_key
             return self._pipeline
-        
-        # Find model file
-        model_path = self._find_model_file(model_name)
-        
-        logger.info(f"Loading model from: {model_path}")
-        
-        # Load the pipeline
-        if model_path.suffix.lower() == ".safetensors":
-            self._pipeline = self._load_from_safetensors(model_path)
-        else:
-            self._pipeline = self._load_from_ckpt(model_path)
-        
+
+        logger.info(f"Loading model from: {path}")
+
+        # Load the pipeline using from_single_file
+        self._pipeline = StableDiffusionPipeline.from_single_file(
+            str(path),
+            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
+            safety_checker=None if not self.safety_checker else None,
+            requires_safety_checker=self.safety_checker,
+            token=self.hf_token,
+        )
+
         # Apply optimizations
         self._apply_optimizations()
-        
-        self._current_model = model_name or model_path.name
-        
+
+        self._current_model = model_key
+
         # Cache the pipeline
-        if model_name:
-            self._model_cache[model_name] = self._pipeline
-        
+        self._model_cache[model_key] = self._pipeline
+
         logger.info(f"Model loaded: {self._current_model}")
         return self._pipeline
-    
-    def _find_model_file(self, model_name: Optional[str] = None) -> Path:
+
+    def _resolve_model_path(self, model_identifier: Optional[str] = None) -> Path:
         """
-        Find a model file by name or auto-detect.
-        
+        Resolve a model identifier (path or name) to an absolute file path.
+
         Args:
-            model_name: Specific model name to find
-            
+            model_identifier: Either a full path to a model file, a model name,
+                or None to use default/auto-detect.
+
         Returns:
-            Path to the model file
-            
+            Absolute Path to the model file
+
         Raises:
-            FileNotFoundError: If model not found
+            FileNotFoundError: If model cannot be found
         """
-        if model_name:
-            # Search for specific model
+        if model_identifier:
+            # Try as direct path first
+            p = Path(model_identifier)
+            if p.is_absolute() or p.parent != Path('.'):
+                # Contains directory component or absolute - treat as direct path
+                if p.exists() and p.is_file():
+                    return p.resolve()
+                raise FileNotFoundError(f"Model file not found: {model_identifier}")
+            else:
+                # Treat as model name, search in model_dir
+                for ext in (".safetensors", ".ckpt"):
+                    path = self.model_dir / f"{model_identifier}{ext}"
+                    if path.exists() and path.is_file():
+                        return path.resolve()
+                    path = self.model_dir / model_identifier
+                    if path.exists() and path.is_file():
+                        return path.resolve()
+                raise FileNotFoundError(f"Model not found: {model_identifier}")
+
+        # No identifier provided: use default model from settings or auto-detect
+        from .config import get_settings
+        settings = get_settings()
+        if settings.model.default_model:
+            default_path = Path(settings.model.default_model)
+            if default_path.exists() and default_path.is_file():
+                return default_path.resolve()
+            # If default_model is a name, try in model_dir
             for ext in (".safetensors", ".ckpt"):
-                path = self.model_dir / f"{model_name}{ext}"
-                if path.exists():
-                    return path
-                path = self.model_dir / model_name
+                path = self.model_dir / f"{settings.model.default_model}{ext}"
                 if path.exists() and path.is_file():
-                    return path
-            raise FileNotFoundError(f"Model not found: {model_name}")
-        
+                    return path.resolve()
+            raise FileNotFoundError(f"Default model not found: {settings.model.default_model}")
+
         # Auto-detect first available model
         for ext in (".safetensors", ".ckpt"):
             for path in self.model_dir.rglob(f"*{ext}"):
                 if path.is_file():
-                    return path
-        
+                    return path.resolve()
+
         raise ValueError(f"No models found in {self.model_dir}")
-    
-    def _load_from_safetensors(self, model_path: Path) -> StableDiffusionPipeline:
-        """
-        Load pipeline from a safetensors file.
-        
-        Args:
-            model_path: Path to .safetensors file
-            
-        Returns:
-            Configured StableDiffusionPipeline
-        """
-        # Load safetensors weights
-        state_dict = load_file(str(model_path))
-        
-        # Create pipeline with dummy model, then load weights
-        # This is a simplified approach - in production you might want
-        # to use a base model and merge weights
-        pipeline = StableDiffusionPipeline.from_pretrained(
-            "runwayml/stable-diffusion-v1-5",
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            safety_checker=None if not self.safety_checker else None,
-            requires_safety_checker=self.safety_checker,
-            token=self.hf_token,
-        )
-        
-        # Load custom weights
-        pipeline.unet.load_state_dict(state_dict, strict=False)
-        
-        return pipeline
-    
-    def _load_from_ckpt(self, model_path: Path) -> StableDiffusionPipeline:
-        """
-        Load pipeline from a .ckpt file.
-        
-        Args:
-            model_path: Path to .ckpt file
-            
-        Returns:
-            Configured StableDiffusionPipeline
-        """
-        return StableDiffusionPipeline.from_single_file(
-            str(model_path),
-            torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
-            safety_checker=None if not self.safety_checker else None,
-            requires_safety_checker=self.safety_checker,
-            token=self.hf_token,
-        )
     
     def _apply_optimizations(self) -> None:
         """Apply memory optimizations to the loaded pipeline."""

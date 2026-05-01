@@ -6,7 +6,8 @@ Author: Inventions4All - github:TWeb79
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from ...schemas.model import (
     ModelInfo,
@@ -49,7 +50,7 @@ async def list_models() -> ModelListResponse:
     summary="Load a Model",
     description="Loads a specific model into memory.",
 )
-async def load_model(model_name: str) -> ModelLoadResponse:
+async def load_model(model_name: str) -> ModelLoadResponse | JSONResponse:
     """
     Load a specific model by name.
     
@@ -59,8 +60,8 @@ async def load_model(model_name: str) -> ModelLoadResponse:
     Returns:
         ModelLoadResponse with loading status and device info
         
-    Raises:
-        HTTPException: If model not found or loading fails
+    Errors:
+        JSONResponse with {"error": ...} on failure
     """
     pipeline_manager = get_pipeline_manager()
     
@@ -78,10 +79,16 @@ async def load_model(model_name: str) -> ModelLoadResponse:
         )
     except FileNotFoundError as e:
         logger.error(f"Model not found: {model_name}")
-        raise HTTPException(status_code=404, detail=str(e))
+        return JSONResponse(
+            status_code=404,
+            content={"error": str(e)},
+        )
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to load model: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Failed to load model: {str(e)}"},
+        )
 
 
 @router.post(

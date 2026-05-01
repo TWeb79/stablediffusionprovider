@@ -29,12 +29,22 @@ class ModelListResponse(BaseModel):
 
 
 class ModelLoadRequest(BaseModel):
-    """Request to load a specific model."""
+    """Request to load a specific model by name."""
     
     model_name: str = Field(
         ...,
         min_length=1,
         description="Name of the model to load",
+    )
+
+
+class LoadModelRequest(BaseModel):
+    """Request to load a model by full file path."""
+    
+    model_path: str = Field(
+        ...,
+        min_length=1,
+        description="Full path to the model file (e.g., /models/model.safetensors)",
     )
 
 
